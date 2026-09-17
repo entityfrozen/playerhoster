@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="strict-origin-when-cross-origin">
+<title>Quiet Player</title>
+<style>
+html,body,#player{width:100%;height:100%;margin:0;background:#050507;overflow:hidden}
+body{font-family:system-ui,sans-serif}
+#player iframe{width:100%!important;height:100%!important;min-width:200px;min-height:200px;border:0}
+#status{position:fixed;inset:0;display:grid;place-items:center;color:#77717f;font-size:12px;background:#050507;z-index:2}
+#status.hidden{display:none}
+</style>
+</head>
+<body>
+<div id="player"></div>
+<div id="status">loading player…</div>
+<script>
+(() => {
+  "use strict";
+  const params=new URLSearchParams(location.search)
+  const video=params.get("video")||""
+  const token=params.get("token")||""
+  const widgetReferrer=params.get("widget_referrer")||location.href
+  const status=document.getElementById("status")
+  let player=null
+  let clockTimer=0
+
+  function send(type,extra={}){
+    parent.postMessage({quietYouTube:true,token,type,...extra},"*")
+  }
+
+  function clock(){
+    if(!player?.getCurrentTime)return
+    try{send("clock",{time:Number(player.getCurrentTime())||0,duration:Number(player.getDuration())||0})}catch{}
+  }
+
+  function startClock(){
+    clearInterval(clockTimer)
+    clockTimer=setInterval(clock,250)
+  }
+
+  window.onYouTubeIframeAPIReady=()=>{
+    player=new YT.Player("player",{
+      width:"100%",
+      height:"100%",
+      videoId:video,
+      playerVars:{
+        autoplay:1,
+        controls:1,
+        playsinline:1,
+        rel:0,
+        enablejsapi:1,
+        origin:location.origin,
+        widget_referrer:widgetReferrer
+      },
+      events:{
+        onReady:event=>{
+          status.classList.add("hidden")
+          startClock()
+          send("ready",{time:Number(event.target.getCurrentTime())||0,duration:Number(event.target.getDuration())||0})
+        },
+        onStateChange:event=>{
+          clock()
+          send("state",{state:event.data,time:Number(event.target.getCurrentTime())||0,duration:Number(event.target.getDuration())||0})
+        },
+        onError:event=>send("error",{code:event.data})
+      }
+    })
+  }
+
+  window.addEventListener("message",event=>{
+    const data=event.data
+    if(event.source!==parent||!data?.quietYouTube||data.token!==token||!player)return
+    try{
+      if(data.type==="load")player.loadVideoById(String(data.value||""))
+      else if(data.type==="play")player.playVideo()
+      else if(data.type==="pause")player.pauseVideo()
+      else if(data.type==="seek")player.seekTo(Math.max(0,Number(data.value)||0),true)
+      else if(data.type==="volume")player.setVolume(Math.max(0,Math.min(100,Number(data.value)||0)))
+    }catch{}
+  })
+
+  const script=document.createElement("script")
+  script.src="https://www.youtube.com/iframe_api"
+  script.onerror=()=>{status.textContent="player failed to load";send("error",{code:-1})}
+  document.head.append(script)
+})()
+</script>
+</body>
+</html>
